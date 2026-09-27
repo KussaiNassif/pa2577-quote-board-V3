@@ -269,7 +269,7 @@ without going through the other one.
 
 ## 4. Configuration management repository
 
-Repository: <REPO-URL>
+Repository: https://github.com/KussaiNassif/pa2577-quote-board-V3
 
 ## 5. Video outline (5–10 min)
 
