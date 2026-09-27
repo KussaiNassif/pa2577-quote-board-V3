@@ -1,0 +1,16 @@
+# Non-sensitive config for quotes-api, consumed as individual env vars
+# (env[].valueFrom.configMapKeyRef) - see Quiz 2 answer on ConfigMap usage.
+#
+# STATS_API_URL must be an address reachable from the USER'S BROWSER (not
+# from inside the cluster), because app.js runs client-side. ":30081" means
+# "same host as the page, port 30081" (stats-api's NodePort), so no node IP
+# has to be written here - it works on any cluster.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: quotes-api-config
+  namespace: quoteboard
+data:
+  MONGO_HOST: "mongo:27017"
+  MONGO_DB: "quotes"
+  STATS_API_URL: ":30081"

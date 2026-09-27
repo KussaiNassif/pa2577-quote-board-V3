@@ -1,0 +1,15 @@
+# ClusterIP (default) - Mongo is never reached from outside the cluster,
+# only quotes-api talks to it. Also the StatefulSet's serviceName. quotes-api finds it by DNS name ("mongo"),
+# which resolves as soon as this Service exists; apply order within one
+# `kubectl apply -f k8s/` does not matter for that.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+  namespace: quoteboard
+spec:
+  selector:
+    app: mongo
+  ports:
+    - port: 27017
+      targetPort: 27017

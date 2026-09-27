@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Quote Board</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.4rem; }
+  form { display: flex; flex-direction: column; gap: .5rem; margin-bottom: 1.5rem; }
+  input, textarea { padding: .5rem; font: inherit; }
+  button { padding: .5rem 1rem; cursor: pointer; }
+  .quote { border-left: 3px solid #888; padding-left: .75rem; margin-bottom: .75rem; }
+  .quote small { color: #666; }
+  #stats { background: #f4f4f4; padding: 1rem; border-radius: 6px; font-size: .9rem; }
+  section { margin-bottom: 2rem; }
+</style>
+</head>
+<body>
+<h1>Quote Board</h1>
+
+<section>
+  <h2>Add a quote</h2>
+  <form id="quote-form">
+    <textarea id="text" placeholder="Quote text" maxlength="500" required></textarea>
+    <input id="author" placeholder="Author" maxlength="120" required>
+    <button type="submit">Submit</button>
+  </form>
+  <p id="form-status" style="color:#b00"></p>
+</section>
+
+<section>
+  <h2>Quotes <small>(served by quotes-api)</small></h2>
+  <div id="quotes">Loading...</div>
+</section>
+
+<section>
+  <h2>Stats <small>(computed by stats-api, called live from your browser)</small></h2>
+  <div id="stats">Loading...</div>
+</section>
+
+<script src="/config.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

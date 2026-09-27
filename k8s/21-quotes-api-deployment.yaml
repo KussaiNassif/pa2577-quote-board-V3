@@ -1,0 +1,68 @@
+# Replace kussainassif with your Docker Hub username after pushing the image.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: quotes-api
+  namespace: quoteboard
+spec:
+  replicas: 2   # stateless, safe to scale independently of stats-api
+  selector:
+    matchLabels:
+      app: quotes-api
+  template:
+    metadata:
+      labels:
+        app: quotes-api
+    spec:
+      containers:
+        - name: quotes-api
+          image: kussainassif/quotes-api:1.0.0
+          ports:
+            - containerPort: 3000
+          env:
+            - name: MONGO_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: quotes-api-config
+                  key: MONGO_HOST
+            - name: MONGO_DB
+              valueFrom:
+                configMapKeyRef:
+                  name: quotes-api-config
+                  key: MONGO_DB
+            - name: STATS_API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: quotes-api-config
+                  key: STATS_API_URL
+            - name: MONGO_USER
+              valueFrom:
+                secretKeyRef:
+                  name: mongo-credentials
+                  key: username
+            - name: MONGO_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: mongo-credentials
+                  key: password
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          # Readiness checks Mongo (stop routing traffic while the DB is down);
+          # liveness does NOT (restarting quotes-api can't fix a DB outage).
+          livenessProbe:
+            httpGet:
+              path: /livez
+              port: 3000
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi

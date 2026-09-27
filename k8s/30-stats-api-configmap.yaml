@@ -1,0 +1,14 @@
+# QUOTES_API_URL here is the IN-CLUSTER address (Service DNS name), used by
+# stats-api's own server-side fetch() - different from quotes-api-config's
+# STATS_API_URL, which is the browser-facing address. Same pattern, two
+# different network vantage points.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: stats-api-config
+  namespace: quoteboard
+data:
+  QUOTES_API_URL: "http://quotes-api:3000"
+  # CORS: only pages served from quotes-api's NodePort (30080) may call
+  # stats-api from a browser. ":30080" = any host, that port only.
+  ALLOWED_ORIGIN: ":30080"

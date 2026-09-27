@@ -1,0 +1,13 @@
+{
+  "name": "quotes-api",
+  "version": "1.0.0",
+  "description": "Owns the quote database. REST API + serves the browser frontend.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "mongoose": "^8.5.1"
+  }
+}

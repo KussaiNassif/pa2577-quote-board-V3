@@ -1,0 +1,15 @@
+# NodePort so a browser (or curl, or the video walkthrough) can hit stats-api's
+# REST API directly, independent of quotes-api: http://<NODE-IP>:30081/api/stats
+apiVersion: v1
+kind: Service
+metadata:
+  name: stats-api
+  namespace: quoteboard
+spec:
+  type: NodePort
+  selector:
+    app: stats-api
+  ports:
+    - port: 3001
+      targetPort: 3001
+      nodePort: 30081

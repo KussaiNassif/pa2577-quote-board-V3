@@ -1,0 +1,12 @@
+{
+  "name": "stats-api",
+  "version": "1.0.0",
+  "description": "Stateless service. Has no database access - fetches quotes from quotes-api over REST and computes statistics.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

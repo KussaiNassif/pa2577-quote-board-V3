@@ -1,0 +1,38 @@
+# Local dev/smoke-test harness, mirrors the k8s topology in ./k8s.
+# NOT the graded deployment target - the assignment requires Kubernetes.
+# Run: echo "MONGO_PASSWORD=$(head -c 18 /dev/urandom | base64)" > .env   (once; .env is gitignored)
+#      docker compose up --build, then open http://localhost:3000
+services:
+  mongo:
+    image: mongo:7
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?set MONGO_PASSWORD in .env}
+    volumes:
+      - mongo-data:/data/db
+
+  quotes-api:
+    build: ./quotes-api
+    ports:
+      - "3000:3000"
+    environment:
+      MONGO_USER: root
+      MONGO_PASS: ${MONGO_PASSWORD:?set MONGO_PASSWORD in .env}
+      MONGO_HOST: mongo:27017
+      MONGO_DB: quotes
+      STATS_API_URL: ":3001"      # same host as the page, port 3001
+    depends_on:
+      - mongo
+
+  stats-api:
+    build: ./stats-api
+    ports:
+      - "3001:3001"
+    environment:
+      QUOTES_API_URL: http://quotes-api:3000
+      ALLOWED_ORIGIN: ":3000"     # any host, quotes-api port only
+    depends_on:
+      - quotes-api
+
+volumes:
+  mongo-data:
