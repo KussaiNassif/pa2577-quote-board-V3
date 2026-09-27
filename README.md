@@ -116,32 +116,85 @@ config is not.
 from outside Kubernetes" as the assignment requires. `stats-api` is
 *also* exposed as NodePort (`30081`), not because a human needs to browse
 to it directly, but because the browser's client-side JavaScript calls it
-directly too (see architecture diagram below) — and because it lets a
+directly too (see the data flow diagram below) — and because it lets a
 grader independently `curl` each microservice's REST API on its own,
 without going through the other one.
 
-### Request flow
+### Data model
+
+Only one kind of data is persisted, and only one service owns it.
 
 ```
-                    ┌─────────────┐
-                    │   Browser   │  (outside the cluster)
-                    └──────┬──────┘
-             ┌─────────────┴─────────────┐
-             │ GET /  GET/POST /api/...  │ GET /api/stats
-             ▼                            ▼
-   ┌───────────────────┐        ┌───────────────────┐
-   │  quotes-api        │        │  stats-api         │
-   │  NodePort :30080   │        │  NodePort :30081   │
-   │  (2 replicas)       │        │  (2 replicas)       │
-   └─────────┬───────────┘        └─────────┬───────────┘
-             │ mongodb://                   │ GET http://quotes-api:3000/api/quotes
-             ▼                              │ (in-cluster REST call)
-   ┌───────────────────┐                    │
-   │  mongo              │◄───────(no direct access from stats-api)
-   │  ClusterIP, PVC     │
-   │  (1 replica)         │
-   └───────────────────┘
+MongoDB  database "quotes"  →  collection "quotes"   (owner: quotes-api ONLY)
+┌──────────────────────────────────────────────────────────────────────┐
+│ Quote document (Mongoose schema in quotes-api/server.js)             │
+│   _id        ObjectId  auto; contains the creation time, so sorting  │
+│                        on _id = sorting by insertion order           │
+│   text       String    required, trimmed, max 500 chars              │
+│   author     String    required, trimmed, max 120 chars              │
+│   createdAt  Date      default: now                                  │
+│   __v        Number    Mongoose version key (automatic)              │
+└──────────────────────────────────────────────────────────────────────┘
+  stored on PVC "mongo-data-mongo-0" (1Gi) → survives pod and cluster restarts
+
+Derived data, NOT persisted (owner: stats-api, in memory, one copy per pod)
+┌──────────────────────────────────────────────────────────────────────┐
+│ Stats (response of GET /api/stats)                                   │
+│   totalQuotes      Number                                            │
+│   averageLength    Number   (characters, rounded)                    │
+│   topWords         [{ word: String, count: Number }]  top 10,        │
+│                    English stopwords excluded                        │
+│   quotesPerAuthor  { <author>: Number }                              │
+│ Cache: { count, stats }  reused while X-Total-Count is unchanged     │
+└──────────────────────────────────────────────────────────────────────┘
+
+Configuration data (Kubernetes objects, not application data)
+  Secret    mongo-credentials   username, password → mongo + quotes-api only
+  ConfigMap quotes-api-config   MONGO_HOST, MONGO_DB, STATS_API_URL
+  ConfigMap stats-api-config    QUOTES_API_URL, ALLOWED_ORIGIN
 ```
+
+### Data flow diagram
+
+Processes are the two microservices, data stores are MongoDB and
+stats-api's in-memory cache, and the only external entity is the user's
+browser. The dashed line is the cluster boundary: everything crossing it
+goes through a NodePort.
+
+```
+  EXTERNAL ENTITY                     KUBERNETES CLUSTER (namespace quoteboard)
+ ┌──────────────┐  ┆
+ │   Browser    │  ┆   (1) POST /api/quotes {text, author}
+ │ (user, runs  │──┆──────────────────────────────►┌───────────────────┐ (2) insert  ╔══════════════╗
+ │  app.js)     │◄─┆───────────────────────────────│ P1  quotes-api    │────────────►║ D1  MongoDB  ║
+ │              │  ┆   (3) 201 + saved quote        │ NodePort :30080   │             ║ "quotes"     ║
+ │              │  ┆                                │ validates, owns   │◄────────────║ on PVC       ║
+ │              │──┆── (4) GET /api/quotes ────────►│ the data          │ (9) find,   ╚══════════════╝
+ │              │◄─┆── list, newest first ──────────│                   │ sort _id,        ▲
+ │              │  ┆                                └───────────────────┘ countDocuments   │ Secret:
+ │              │  ┆                                    ▲         │                      │ credentials
+ │              │  ┆                (6) GET ?limit=1 ──┘         │ X-Total-Count         │ (quotes-api
+ │              │  ┆                (8) GET ?order=asc&limit=500 │ + pages of quotes     │  only)
+ │              │  ┆                    &skip=N (REST, in-cluster)▼
+ │              │──┆── (5) GET /api/stats ─────────►┌───────────────────┐ (7) count    ┌──────────────┐
+ │              │  ┆      Origin: http://…:30080    │ P2  stats-api     │ unchanged? ─►│ D2  cache    │
+ │              │◄─┆── (10) stats JSON ─────────────│ NodePort :30081   │◄─────────────│ {count,stats}│
+ └──────────────┘  ┆      + Access-Control-         │ NO database access│  HIT → reuse │ per pod, RAM │
+                   ┆        Allow-Origin            └───────────────────┘              └──────────────┘
+```
+
+| # | Flow | Data | Notes |
+|---|---|---|---|
+| 1 | Browser → quotes-api | `{text, author}` JSON, max 10 kB | rejected with 400 unless both are non-empty strings |
+| 2 | quotes-api → MongoDB | Quote document | the only write path in the system |
+| 3 | quotes-api → Browser | saved quote, `201` | |
+| 4 | Browser → quotes-api → Browser | list of quotes (default newest first) | rendered through `escapeHtml` |
+| 5 | Browser → stats-api | `GET /api/stats`, with `Origin` header | cross-origin, so CORS applies |
+| 6 | stats-api → quotes-api | `GET /api/quotes?limit=1` | reads only the `X-Total-Count` header |
+| 7 | stats-api ↔ its cache | `{count, stats}` | same count → answer from cache (`X-Cache: HIT`) |
+| 8 | stats-api → quotes-api | pages of 500, `order=asc` | only on a cache miss; max 200 pages |
+| 9 | quotes-api → MongoDB | `find().sort({_id}).skip().limit()`, `countDocuments()` | |
+| 10 | stats-api → Browser | stats JSON | `502`/`504` if quotes-api failed or timed out |
 
 ## 3. Benefits and challenges
 
@@ -277,7 +330,7 @@ Repository: https://github.com/KussaiNassif/pa2577-quote-board-V3
 1. What the project is (30s) — the Quote Board idea, and the honest
    acknowledgement that it's intentionally small (see §1).
 2. Walk through `quotes-api` and `stats-api`'s responsibilities and how
-   they talk over REST (2 min) — use the request-flow diagram above.
+   they talk over REST (2 min) — use the data flow diagram in §2.
 3. Run it (see "How to deploy"), then `kubectl get pods -n quoteboard`
    showing replicas coming up (2 min).
 4. Open the browser at the NodePort URL, add a quote, show the stats panel
