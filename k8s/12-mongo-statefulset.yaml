@@ -1,14 +1,11 @@
-# The database, as a StatefulSet (as in the course's QuoteFinder deployment):
-# a StatefulSet gives each replica a stable identity (mongo-0) and its OWN
-# volume, created from volumeClaimTemplates below. Not scaled - the
-# assignment allows a single database instance.
+# MongoDB: one replica with its own persistent volume (not scaled).
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: mongo
   namespace: quoteboard
 spec:
-  serviceName: mongo        # the Service in 13-mongo-service.yaml
+  serviceName: mongo
   replicas: 1
   selector:
     matchLabels:
@@ -25,7 +22,6 @@ spec:
             - containerPort: 27017
               name: mongodb-port
           env:
-            # Root user is created only on first start with an empty volume.
             - name: MONGO_INITDB_ROOT_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -36,13 +32,12 @@ spec:
                 secretKeyRef:
                   name: mongo-credentials
                   key: password
-          # Ready only when MongoDB actually answers (ping needs no login).
           readinessProbe:
             exec:
               command: ["mongosh", "--quiet", "--eval", "db.adminCommand({ping: 1})"]
             initialDelaySeconds: 10
             periodSeconds: 10
-            timeoutSeconds: 10   # mongosh itself is slow on a cold start
+            timeoutSeconds: 10
           volumeMounts:
             - name: mongo-data
               mountPath: /data/db
@@ -53,9 +48,6 @@ spec:
             limits:
               cpu: 500m
               memory: 512Mi
-  # One PersistentVolumeClaim per replica, named mongo-data-mongo-0.
-  # It is NOT deleted when the StatefulSet (or `kubectl delete -f k8s/`) is,
-  # so data survives redeploys; delete the PVC explicitly to wipe data.
   volumeClaimTemplates:
     - metadata:
         name: mongo-data

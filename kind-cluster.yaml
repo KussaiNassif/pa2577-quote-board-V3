@@ -1,6 +1,4 @@
-# Local Kubernetes cluster for this project (kind = Kubernetes in Docker).
-# Maps the two NodePorts to the same ports on the host, so the app is at
-# http://localhost:30080 (the gateway) and localhost:30081 (stats-api, for curl).
+# Local kind cluster: maps the gateway's NodePort 30080 to localhost.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
@@ -8,5 +6,3 @@ nodes:
     extraPortMappings:
       - containerPort: 30080
         hostPort: 30080
-      - containerPort: 30081
-        hostPort: 30081

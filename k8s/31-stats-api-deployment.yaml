@@ -1,11 +1,11 @@
-# stats-api: stateless REST service, no database access (image kussainassif/stats-api on Docker Hub).
+# stats-api: computes statistics from quotes-api over REST (no database access).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: stats-api
   namespace: quoteboard
 spec:
-  replicas: 2   # stateless, scales independently of quotes-api
+  replicas: 2
   selector:
     matchLabels:
       app: stats-api

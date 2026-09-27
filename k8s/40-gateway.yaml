@@ -1,6 +1,4 @@
-# gateway: the single entry point for browsers (API-Gateway pattern).
-# Routes /api/stats to stats-api and everything else to quotes-api, so the
-# two business services never call each other in a cycle.
+# gateway: the single entry point; routes /api/stats to stats-api, everything else to quotes-api.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -12,6 +10,7 @@ data:
     http {
       server {
         listen 8080;
+        location /healthz   { return 200 "ok\n"; }
         location /api/stats { proxy_pass http://stats-api:3001; }
         location /          { proxy_pass http://quotes-api:3000; }
       }
@@ -23,7 +22,7 @@ metadata:
   name: gateway
   namespace: quoteboard
 spec:
-  replicas: 2   # stateless, scales like the other services
+  replicas: 2
   selector:
     matchLabels:
       app: gateway
@@ -41,6 +40,14 @@ spec:
             - name: config
               mountPath: /etc/nginx/nginx.conf
               subPath: nginx.conf
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
       volumes:
         - name: config
           configMap:

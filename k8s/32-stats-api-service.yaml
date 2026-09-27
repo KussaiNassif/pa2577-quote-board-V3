@@ -1,15 +1,11 @@
-# NodePort so stats-api's REST API can be called directly (curl, grading), independent
-# of the gateway: http://<NODE-IP>:30081/api/stats. Browsers go through the gateway.
 apiVersion: v1
 kind: Service
 metadata:
   name: stats-api
   namespace: quoteboard
 spec:
-  type: NodePort
   selector:
     app: stats-api
   ports:
     - port: 3001
       targetPort: 3001
-      nodePort: 30081

@@ -1,6 +1,3 @@
-# QUOTES_API_URL is quotes-api's IN-CLUSTER address (Service DNS name), used
-# by stats-api's own server-side fetch(). Mirror image of quotes-api-config:
-# each service finds the other by its Service name.
 apiVersion: v1
 kind: ConfigMap
 metadata:

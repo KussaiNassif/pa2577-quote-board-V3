@@ -1,5 +1,3 @@
-# ClusterIP: only reachable inside the cluster. Browsers reach quotes-api
-# through the gateway (k8s/40-gateway.yaml).
 apiVersion: v1
 kind: Service
 metadata:

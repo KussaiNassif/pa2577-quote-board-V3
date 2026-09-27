@@ -1,5 +1,3 @@
-# Non-sensitive config for quotes-api, consumed as individual env vars
-# (env[].valueFrom.configMapKeyRef) - see Quiz 2 answer on ConfigMap usage.
 apiVersion: v1
 kind: ConfigMap
 metadata:

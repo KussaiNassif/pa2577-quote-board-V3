@@ -1,11 +1,11 @@
-# quotes-api: stateless REST service (image kussainassif/quotes-api on Docker Hub).
+# quotes-api: owns the quote data (the only service with database access).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: quotes-api
   namespace: quoteboard
 spec:
-  replicas: 2   # stateless, safe to scale independently of stats-api
+  replicas: 2
   selector:
     matchLabels:
       app: quotes-api
@@ -46,8 +46,6 @@ spec:
               port: 3000
             initialDelaySeconds: 5
             periodSeconds: 10
-          # Readiness checks Mongo (stop routing traffic while the DB is down);
-          # liveness does NOT (restarting quotes-api can't fix a DB outage).
           livenessProbe:
             httpGet:
               path: /livez
