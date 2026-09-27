@@ -1,0 +1,61 @@
+# gateway: the single entry point for browsers (API-Gateway pattern).
+# Routes /api/stats to stats-api and everything else to quotes-api, so the
+# two business services never call each other in a cycle.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-config
+  namespace: quoteboard
+data:
+  nginx.conf: |
+    events {}
+    http {
+      server {
+        listen 8080;
+        location /api/stats { proxy_pass http://stats-api:3001; }
+        location /          { proxy_pass http://quotes-api:3000; }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: quoteboard
+spec:
+  replicas: 2   # stateless, scales like the other services
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      containers:
+        - name: gateway
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+      volumes:
+        - name: config
+          configMap:
+            name: gateway-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: quoteboard
+spec:
+  type: NodePort
+  selector:
+    app: gateway
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30080

@@ -1,5 +1,5 @@
-# NodePort so a browser (or curl, or the video walkthrough) can hit stats-api's
-# REST API directly, independent of quotes-api: http://<NODE-IP>:30081/api/stats
+# NodePort so stats-api's REST API can be called directly (curl, grading), independent
+# of the gateway: http://<NODE-IP>:30081/api/stats. Browsers go through the gateway.
 apiVersion: v1
 kind: Service
 metadata:

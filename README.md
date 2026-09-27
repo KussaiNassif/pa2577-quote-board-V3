@@ -43,10 +43,10 @@ actually need this, and part of the exercise is knowing when they don't.
 
 | Component | Type | Responsibility | REST API |
 |---|---|---|---|
-| **quotes-api** | Microservice A (stateful-backed) | Owns the MongoDB database exclusively. Accepts new quotes, lists quotes, serves the browser frontend (static HTML/JS) and a small runtime-config endpoint. | `GET/POST /api/quotes`, `GET /api/quotes/:id`, `GET /healthz`, `GET /livez` |
+| **quotes-api** | Microservice A (stateful-backed) | Owns the MongoDB database exclusively. Accepts new quotes, lists quotes, serves the browser frontend (static HTML/JS), and is the browser's single entry point: it forwards `GET /api/stats` to `stats-api` inside the cluster. | `GET/POST /api/quotes`, `GET /api/quotes/:id`, `GET /api/stats` (forwarded), `GET /healthz`, `GET /livez` |
 | **stats-api** | Microservice B (stateless) | Has **no** database access. Calls `quotes-api`'s REST API to fetch all quotes, then computes word-frequency and per-author statistics in memory. | `GET /api/stats`, `GET /healthz` |
 | **mongo** | Database | Persists quotes. Single instance, not scaled (per assignment allowance). PVC-backed storage. | none (internal only, not a microservice) |
-| **Browser** | Client, outside the cluster | Loads `quotes-api`'s static page, then makes REST calls to *both* `quotes-api` (read/write quotes) and `stats-api` (read stats) directly. | consumer |
+| **Browser** | Client, outside the cluster | Loads `quotes-api`'s static page and makes all REST calls to that same origin: quotes directly, stats through `quotes-api`'s forwarding. | consumer |
 
 ### Architecture principles / cloud patterns applied
 
@@ -59,11 +59,19 @@ This maps directly onto the pattern catalogues studied in Quiz 2
   every `worker` connected straight to the shared Mongo instance (the
   weaker "Shared Database Server" pattern). Here, `stats-api` gets its data
   the correct way: over REST, from the service that owns it.
-- **Single Service per Host / service-instance-per-container** (Taibi et al.)
-  — each of the three components (`quotes-api`, `stats-api`, `mongo`) is its
-  own container image and its own Kubernetes workload: the two APIs are
-  Deployments that scale independently, and `mongo` is a single-replica
-  StatefulSet (not scaled, per the assignment's allowance).
+- **Service instance per container** (Taibi et al., a sub-variant of
+  *Single Service per Host*) — each of the three components (`quotes-api`,
+  `stats-api`, `mongo`) is its own container image and its own Kubernetes
+  workload: the two APIs are Deployments that scale independently, and
+  `mongo` is a single-replica StatefulSet (not scaled, per the assignment's
+  allowance). *Note:* the local kind cluster has a single node, so at the
+  machine level all pods share one host (*Multiple Service per Host*); on a
+  multi-node cluster the scheduler would spread them.
+- **Server-side Discovery** (Taibi et al.) — `stats-api` calls the stable
+  name `http://quotes-api:3000`; Kubernetes DNS resolves it to the Service,
+  and the Service load-balances to a ready replica. The caller never keeps a
+  list of instances (that would be *Client-side Discovery*). The same
+  holds the other way: `quotes-api` forwards stats to `http://stats-api:3001`.
 - **Horizontally Scaling Compute** (Wilder) — `quotes-api` and `stats-api`
   are both stateless HTTP services (no server-side session, no socket.io —
   a deliberate lesson taken from QuoteFinder V2's frontend-scaling problem)
@@ -79,9 +87,13 @@ This maps directly onto the pattern catalogues studied in Quiz 2
   `sessionAffinity: ClientIP` because socket.io tied a browser to one pod.
   Quote Board uses only stateless request/response REST, so every
   request can go to any replica and no session affinity is required.
-- **No API-Gateway** — the browser talks to both services' NodePorts
-  directly rather than through a single gateway. This is a conscious
-  simplification (see Challenges below), not an oversight.
+- **Single entry point (a minimal API-Gateway, Taibi et al.)** — the
+  browser only talks to `quotes-api` (one NodePort, one origin).
+  `quotes-api` forwards `/api/stats` to `stats-api` over REST inside the
+  cluster. This removes the need for CORS and makes the app work behind
+  any NodePort, tunnel or proxy (e.g. `minikube service`). It is a
+  deliberately small gateway: no auth, TLS or rate limiting yet (see
+  Challenges).
 - **REST as the sole inter-service contract** — `stats-api` never imports
   `quotes-api`'s code or schema; it only knows one HTTP endpoint contract.
   This is what lets the two services be written, deployed, versioned, and
@@ -96,13 +108,11 @@ stats-api   → Deployment (2 replicas) + ConfigMap + Service (NodePort 30081)
 mongo       → StatefulSet (1 replica, volumeClaimTemplates → PVC 1Gi, readiness probe) + Secret + Service (ClusterIP)
 ```
 
-Two ConfigMaps carry the *same* variable name (`STATS_API_URL` /
-`QUOTES_API_URL`) but with **different values for different vantage
-points** — `quotes-api-config`'s `STATS_API_URL` is the browser-facing
-NodePort address, while `stats-api-config`'s `QUOTES_API_URL` is the
-in-cluster Service DNS name (`http://quotes-api:3000`). This distinction
-— "what address is *this* caller actually located at" — is worth being
-able to explain clearly in the video/defense.
+The two ConfigMaps mirror each other: `quotes-api-config`'s
+`STATS_API_URL` (`http://stats-api:3001`) and `stats-api-config`'s
+`QUOTES_API_URL` (`http://quotes-api:3000`) are both **in-cluster Service
+DNS names**. Each service finds the other by name, never by IP, so one
+`kubectl apply -f k8s/` works without any address being filled in.
 
 Secrets (Mongo root credentials) are separated from ConfigMaps and injected
 via `secretKeyRef`, matching the Quiz 2 answer on ConfigMap vs Secret: this
@@ -113,12 +123,10 @@ config is not.
 
 `quotes-api`'s Service is `type: NodePort`, reachable from a browser at
 `http://<node-ip>:30080` — this is what makes the application "accessible
-from outside Kubernetes" as the assignment requires. `stats-api` is
-*also* exposed as NodePort (`30081`), not because a human needs to browse
-to it directly, but because the browser's client-side JavaScript calls it
-directly too (see the data flow diagram below) — and because it lets a
-grader independently `curl` each microservice's REST API on its own,
-without going through the other one.
+from outside Kubernetes" as the assignment requires, and it is the only
+address the browser needs. `stats-api` is *also* exposed as NodePort
+(`30081`), not for the browser, but so that a grader can `curl` each
+microservice's REST API on its own, without going through the other one.
 
 ### Data model
 
@@ -150,37 +158,40 @@ Derived data, NOT persisted (owner: stats-api, in memory, one copy per pod)
 
 Configuration data (Kubernetes objects, not application data)
   Secret    mongo-credentials   username, password → mongo + quotes-api only
-  ConfigMap quotes-api-config   MONGO_HOST, MONGO_DB, STATS_API_URL
-  ConfigMap stats-api-config    QUOTES_API_URL, ALLOWED_ORIGIN
+  ConfigMap quotes-api-config   MONGO_HOST, MONGO_DB, STATS_API_URL (in-cluster)
+  ConfigMap stats-api-config    QUOTES_API_URL (in-cluster)
 ```
 
 ### Data flow diagram
 
 Processes are the two microservices, data stores are MongoDB and
 stats-api's in-memory cache, and the only external entity is the user's
-browser. The dashed line is the cluster boundary: everything crossing it
-goes through a NodePort.
+browser. The dashed line is the cluster boundary: the browser crosses it
+at exactly one place, `quotes-api`'s NodePort.
 
 ```
-  EXTERNAL ENTITY                     KUBERNETES CLUSTER (namespace quoteboard)
- ┌──────────────┐  ┆
- │   Browser    │  ┆   (1) POST /api/quotes {text, author}
- │ (user, runs  │──┆──────────────────────────────►┌───────────────────┐ (2) insert  ╔══════════════╗
- │  app.js)     │◄─┆───────────────────────────────│ P1  quotes-api    │────────────►║ D1  MongoDB  ║
- │              │  ┆   (3) 201 + saved quote        │ NodePort :30080   │             ║ "quotes"     ║
- │              │  ┆                                │ validates, owns   │◄────────────║ on PVC       ║
- │              │──┆── (4) GET /api/quotes ────────►│ the data          │ (9) find,   ╚══════════════╝
- │              │◄─┆── list, newest first ──────────│                   │ sort _id,        ▲
- │              │  ┆                                └───────────────────┘ countDocuments   │ Secret:
- │              │  ┆                                    ▲         │                      │ credentials
- │              │  ┆                (6) GET ?limit=1 ──┘         │ X-Total-Count         │ (quotes-api
- │              │  ┆                (8) GET ?order=asc&limit=500 │ + pages of quotes     │  only)
- │              │  ┆                    &skip=N (REST, in-cluster)▼
- │              │──┆── (5) GET /api/stats ─────────►┌───────────────────┐ (7) count    ┌──────────────┐
- │              │  ┆      Origin: http://…:30080    │ P2  stats-api     │ unchanged? ─►│ D2  cache    │
- │              │◄─┆── (10) stats JSON ─────────────│ NodePort :30081   │◄─────────────│ {count,stats}│
- └──────────────┘  ┆      + Access-Control-         │ NO database access│  HIT → reuse │ per pod, RAM │
-                   ┆        Allow-Origin            └───────────────────┘              └──────────────┘
+ EXTERNAL ENTITY   ┆                 KUBERNETES CLUSTER (namespace quoteboard)
+ ┌─────────────┐   ┆
+ │  Browser    │   ┆ (1) POST /api/quotes {text,author}
+ │ (user, runs │───┆─────────────────────►┌──────────────────────┐ (2) insert    ╔═════════════╗
+ │  app.js)    │◄──┆──────────────────────│ P1  quotes-api       │──────────────►║ D1 MongoDB  ║
+ │             │   ┆ (3) 201 + quote      │ NodePort :30080      │               ║ "quotes"    ║
+ │             │───┆─ (4) GET /api/quotes►│ owns the data,       │◄──────────────║ on PVC      ║
+ │             │◄──┆── list, newest first─│ single entry point   │ (9) find,     ╚═════════════╝
+ │             │   ┆                      │                      │ sort _id, countDocuments
+ │             │───┆─ (5) GET /api/stats ►│  forwards ──┐        │
+ │             │◄──┆─ (12) stats JSON ────│  ◄──────┐   │        │
+ └─────────────┘   ┆   (same origin,      └─────────┼───┼────────┘
+                   ┆    no CORS)             (11)   │   │ (6) GET http://stats-api:3001/api/stats
+                   ┆                       stats    │   ▼     (REST, in-cluster)
+                   ┆                      ┌─────────┴────────────┐ (8) count     ┌──────────────┐
+                   ┆                      │ P2  stats-api        │ unchanged? ──►│ D2  cache    │
+                   ┆  curl only ─────────►│ NodePort :30081      │◄──────────────│ {count,stats}│
+                   ┆  (grading)           │ NO database access   │  HIT → reuse  │ per pod, RAM │
+                   ┆                      └──────────┬───────────┘               └──────────────┘
+                   ┆                                 │ (7) GET http://quotes-api:3000/api/quotes?limit=1
+                   ┆                                 │ (10) on a miss: ?order=asc&limit=500&skip=N
+                   ┆                                 └──────────► back to P1 (REST, in-cluster)
 ```
 
 | # | Flow | Data | Notes |
@@ -189,12 +200,14 @@ goes through a NodePort.
 | 2 | quotes-api → MongoDB | Quote document | the only write path in the system |
 | 3 | quotes-api → Browser | saved quote, `201` | |
 | 4 | Browser → quotes-api → Browser | list of quotes (default newest first) | rendered through `escapeHtml` |
-| 5 | Browser → stats-api | `GET /api/stats`, with `Origin` header | cross-origin, so CORS applies |
-| 6 | stats-api → quotes-api | `GET /api/quotes?limit=1` | reads only the `X-Total-Count` header |
-| 7 | stats-api ↔ its cache | `{count, stats}` | same count → answer from cache (`X-Cache: HIT`) |
-| 8 | stats-api → quotes-api | pages of 500, `order=asc` | only on a cache miss; max 200 pages |
+| 5 | Browser → quotes-api | `GET /api/stats` | same origin as the page, so no CORS |
+| 6 | quotes-api → stats-api | `GET http://stats-api:3001/api/stats` | in-cluster; 10 s timeout |
+| 7 | stats-api → quotes-api | `GET /api/quotes?limit=1` | reads only the `X-Total-Count` header |
+| 8 | stats-api ↔ its cache | `{count, stats}` | same count → answer from cache (`X-Cache: HIT`) |
 | 9 | quotes-api → MongoDB | `find().sort({_id}).skip().limit()`, `countDocuments()` | |
-| 10 | stats-api → Browser | stats JSON | `502`/`504` if quotes-api failed or timed out |
+| 10 | stats-api → quotes-api | pages of 500, `order=asc` | only on a cache miss; max 200 pages |
+| 11 | stats-api → quotes-api | stats JSON (+ `X-Cache`) | `502`/`504` if stats-api's own upstream failed |
+| 12 | quotes-api → Browser | stats JSON | `502` if stats-api is unreachable, `504` if it timed out |
 
 ## 3. Benefits and challenges
 
@@ -212,17 +225,20 @@ goes through a NodePort.
   between them is a REST JSON response.
 - **Resilience isolation.** If `stats-api` crashes or is slow, quote
   submission and browsing keep working — the frontend degrades gracefully
-  (see `app.js`'s try/catch around the stats fetch).
+  (see `app.js`'s try/catch around the stats fetch). Tested with `stats-api`
+  scaled to 0: quote requests kept answering `200`, `/api/stats` answered
+  `502`, and the page showed "Stats unavailable: 502 stats-api unavailable".
 
 ### Challenges — and what was done / can be done about them
 
-- **No API Gateway → the browser must know two separate addresses.**
-  Today this is hardcoded via a `ConfigMap`-injected `STATS_API_URL`. At
-  real scale this doesn't hold up (every NodePort is a new thing clients
-  must track, and NodePort numbers aren't stable across clusters). *Fix:*
-  introduce a single Ingress (or a real API-Gateway pattern) in front of
-  both services, so the browser only ever talks to one hostname/path
-  prefix and internal service topology can change freely.
+- **The single entry point is minimal, and quotes-api carries it.**
+  *Done:* the browser only knows one address, and `quotes-api` forwards
+  stats requests inside the cluster (an earlier version had the browser
+  call two NodePorts, which broke behind tunnels and needed CORS). *Cost:*
+  `quotes-api` is now on the path of every browser request, so if it is
+  down the stats page is down too (it already served the page). *Next
+  step:* a real Ingress / API-Gateway in front of both services, where
+  TLS, authentication and rate limiting can live in one place.
 - **`mongo` is a single point of failure and a bottleneck** — this was a
   deliberate simplification (the assignment explicitly says the database
   need not scale), but it means both services' availability is capped by
@@ -289,17 +305,13 @@ goes through a NodePort.
   the cluster. *Mitigation:* a NetworkPolicy allowing ingress to `mongo`
   only from `quotes-api` pods (requires a CNI that enforces policies, e.g.
   Calico; not every local cluster's default network enforces them).
-- **CORS is restricted by port, not `*`.** The browser calls `stats-api`
-  directly, so it must send CORS headers. `ALLOWED_ORIGIN: ":30080"` in the
-  ConfigMap allows any origin on quotes-api's port, so the same config works
-  on any node IP. Tested: `http://localhost:30080` is allowed,
-  `http://localhost:9999` and `https://malicious-site.example` are blocked.
-  *Limitation:* the check compares only the port, so a page on a different
-  host that also uses port 30080 (e.g. `http://malicious-site.example:30080`)
-  is allowed too. *Fix:* set `ALLOWED_ORIGIN` to the exact origin
-  (e.g. `http://localhost:30080`), which the code already supports. Note that
-  CORS only stops *browsers* from reading the response; the stats are not
-  secret, and `curl` can always read them.
+- **No cross-origin access at all.** The browser only calls its own
+  origin, so neither service sends CORS headers: no other website can read
+  these APIs from a visitor's browser. (An earlier version let the browser
+  call `stats-api` directly and allowed CORS by port, which also let any
+  site on port 30080 in; routing stats through `quotes-api` removed that
+  gap.) CORS never stopped non-browser clients: `curl` can read the stats
+  NodePort, which is fine because the stats are not secret.
 - **Containers run as a non-root user.** Both Dockerfiles create and
   switch to an unprivileged `app` user before `CMD`, rather than running as
   root inside the container — a small but standard hardening step.
@@ -351,12 +363,15 @@ Repository: https://github.com/KussaiNassif/pa2577-quote-board-V3
 Requires a Kubernetes cluster and `kubectl`. Tested on **kind** (Kubernetes
 in Docker), whose cluster definition is part of this repository
 (`kind-cluster.yaml`, it maps the two NodePorts to localhost). The images
-are on Docker Hub, so nothing needs to be built.
+(`kussainassif/quotes-api:1.0.1`, `kussainassif/stats-api:1.0.1`) are on
+Docker Hub, so nothing needs to be built.
 
 0. Create the cluster: `kind create cluster --name quoteboard --config kind-cluster.yaml`
 
-No IP addresses need to be configured: the browser derives stats-api's
-address from the page's own host (see `STATS_API_URL: ":30081"`).
+No IP addresses need to be configured: the services find each other by
+Service name, and the browser only uses the page's own origin. On other
+clusters (not tested here), any way of reaching port 3000 of the
+`quotes-api` Service works, including `minikube service quotes-api`.
 
 1. Create the namespace and the database Secret (random password, never
    stored in the repository):

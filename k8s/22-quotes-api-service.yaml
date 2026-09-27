@@ -1,15 +1,13 @@
-# NodePort so it's reachable from a browser outside the cluster:
-# http://<NODE-IP>:30080
+# ClusterIP: only reachable inside the cluster. Browsers reach quotes-api
+# through the gateway (k8s/40-gateway.yaml).
 apiVersion: v1
 kind: Service
 metadata:
   name: quotes-api
   namespace: quoteboard
 spec:
-  type: NodePort
   selector:
     app: quotes-api
   ports:
     - port: 3000
       targetPort: 3000
-      nodePort: 30080

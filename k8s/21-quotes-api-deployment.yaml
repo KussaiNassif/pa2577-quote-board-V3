@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: quotes-api
-          image: kussainassif/quotes-api:1.0.0
+          image: kussainassif/quotes-api:1.0.1
           ports:
             - containerPort: 3000
           env:
@@ -30,11 +30,6 @@ spec:
                 configMapKeyRef:
                   name: quotes-api-config
                   key: MONGO_DB
-            - name: STATS_API_URL
-              valueFrom:
-                configMapKeyRef:
-                  name: quotes-api-config
-                  key: STATS_API_URL
             - name: MONGO_USER
               valueFrom:
                 secretKeyRef:

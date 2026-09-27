@@ -20,7 +20,7 @@ services:
       MONGO_PASS: ${MONGO_PASSWORD:?set MONGO_PASSWORD in .env}
       MONGO_HOST: mongo:27017
       MONGO_DB: quotes
-      STATS_API_URL: ":3001"      # same host as the page, port 3001
+      STATS_API_URL: http://stats-api:3001   # in-network address; quotes-api forwards /api/stats
     depends_on:
       - mongo
 
@@ -30,7 +30,6 @@ services:
       - "3001:3001"
     environment:
       QUOTES_API_URL: http://quotes-api:3000
-      ALLOWED_ORIGIN: ":3000"     # any host, quotes-api port only
     depends_on:
       - quotes-api
 

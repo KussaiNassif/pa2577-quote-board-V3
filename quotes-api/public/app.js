@@ -11,19 +11,11 @@ async function loadQuotes() {
     : '<p>No quotes yet.</p>';
 }
 
-// STATS_API_URL may be a full URL, or just ":<port>" meaning "same host as
-// this page, other port" - so the same config works on any cluster/node IP.
-function statsApiUrl() {
-  const u = window.STATS_API_URL;
-  return u.startsWith(':') ? `${location.protocol}//${location.hostname}${u}` : u;
-}
-
 async function loadStats() {
   const el = document.getElementById('stats');
   try {
-    const res = await fetch(`${statsApiUrl()}/api/stats`);
+    const res = await fetch('/api/stats');
     if (!res.ok) {
-      // stats-api is up but its upstream (quotes-api) is not - say which one.
       const body = await res.json().catch(() => ({}));
       throw new Error(`${res.status} ${body.error || 'stats-api error'}`);
     }
@@ -60,7 +52,6 @@ document.getElementById('quote-form').addEventListener('submit', async (e) => {
     return;
   }
   if (!res.ok) {
-    // Keep what the user typed so nothing is lost; show why it failed.
     const body = await res.json().catch(() => ({}));
     status.textContent = `Not saved (${res.status}): ${body.error || 'unknown error'}`;
     return;
