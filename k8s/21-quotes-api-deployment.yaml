@@ -1,4 +1,4 @@
-# Replace kussainassif with your Docker Hub username after pushing the image.
+# quotes-api: stateless REST service (image kussainassif/quotes-api on Docker Hub).
 apiVersion: apps/v1
 kind: Deployment
 metadata:
