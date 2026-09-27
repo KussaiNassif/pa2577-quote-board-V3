@@ -43,7 +43,7 @@ actually need this, and part of the exercise is knowing when they don't.
 
 | Component | Type | Responsibility | REST API |
 |---|---|---|---|
-| **quotes-api** | Microservice A (stateful-backed) | Owns the MongoDB database exclusively. Accepts new quotes, lists quotes, serves the browser frontend (static HTML/JS) and a small runtime-config endpoint. | `GET/POST /api/quotes`, `GET /api/quotes/:id`, `GET /healthz` |
+| **quotes-api** | Microservice A (stateful-backed) | Owns the MongoDB database exclusively. Accepts new quotes, lists quotes, serves the browser frontend (static HTML/JS) and a small runtime-config endpoint. | `GET/POST /api/quotes`, `GET /api/quotes/:id`, `GET /healthz`, `GET /livez` |
 | **stats-api** | Microservice B (stateless) | Has **no** database access. Calls `quotes-api`'s REST API to fetch all quotes, then computes word-frequency and per-author statistics in memory. | `GET /api/stats`, `GET /healthz` |
 | **mongo** | Database | Persists quotes. Single instance, not scaled (per assignment allowance). PVC-backed storage. | none (internal only, not a microservice) |
 | **Browser** | Client, outside the cluster | Loads `quotes-api`'s static page, then makes REST calls to *both* `quotes-api` (read/write quotes) and `stats-api` (read stats) directly. | consumer |
@@ -61,8 +61,9 @@ This maps directly onto the pattern catalogues studied in Quiz 2
   the correct way: over REST, from the service that owns it.
 - **Single Service per Host / service-instance-per-container** (Taibi et al.)
   — each of the three components (`quotes-api`, `stats-api`, `mongo`) is its
-  own container image, its own Kubernetes Deployment, and scales
-  independently.
+  own container image and its own Kubernetes workload: the two APIs are
+  Deployments that scale independently, and `mongo` is a single-replica
+  StatefulSet (not scaled, per the assignment's allowance).
 - **Horizontally Scaling Compute** (Wilder) — `quotes-api` and `stats-api`
   are both stateless HTTP services (no server-side session, no socket.io —
   a deliberate lesson taken from QuoteFinder V2's frontend-scaling problem)
